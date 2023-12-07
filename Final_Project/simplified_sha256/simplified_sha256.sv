@@ -9,7 +9,7 @@ module simplified_sha256 #(parameter integer NUM_OF_WORDS = 40)(
 // FSM state variables 
 enum logic [2:0] {IDLE, BLOCK, COMPUTE, WRITE} state,next_state;
 
-parameter integer SIZE = ??; 
+parameter integer SIZE = 512; 
 
 // NOTE : Below mentioned frame work is for reference purpose.
 // Local variables might not be complete and you might have to add more variables
@@ -64,7 +64,7 @@ assign tstep = (i - 1);
 function logic [15:0] determine_num_blocks(input logic [31:0] size);
 
   // Student to add function implementation
-
+	determine_num_blocks = (size * 32 - 1)/SIZE; 
  
 endfunction
 
@@ -74,8 +74,13 @@ function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w,
                                  input logic [7:0] t);
     logic [31:0] S1, S0, ch, maj, t1, t2; // internal signals
 begin
-    
-    sha256_op = ??;
+    s0 = ror(a, 2) ^ ror(a, 13) ^ ror(a, 22);
+	 maj = (a & b) ^ ( a & c) ^ (b & c);
+	 t2 = s0 + maj;
+	 s1 = ror(e, 6) ^ ror(e, 11) ^ ror(e, 25);
+	 ch = (e & f) ^ (~e & f);
+	 t1 = h + s1 + ch + k[t] + w;  
+    sha256_op = {t1+t2,a,b,c,d+t1,e,f,g};
 end
 endfunction
 
@@ -94,7 +99,7 @@ endfunction
 function logic [31:0] ror(input logic [31:0] in,
                                   input logic [7:0] s);
 begin
-   
+   ror = ((in >> s) | (in << 32-s));
 end
 endfunction
 
@@ -118,15 +123,21 @@ end
 // and write back hash value back to memory
 always_comb begin
   if (!rst_n) begin
-   
-
+		state <= IDLE;
   end
   else begin 
 	  case (state)
 		// Initialize hash values h0 to h7 and a to h, other variables and memory we, address offset, etc
 		IDLE: begin 
 			if(start) begin 
-
+				hash0 = 8'h6a09e667;
+				hash1 = 8'hbb67ae85;
+				hash2 = 8'h3c6ef372;
+				hash3 = 8'ha54ff53a;
+				hash4 = 8'h510e527f;
+				hash5 = 8'h9b05688c;
+				hash6 = 8'h1f83d9ab;
+				hash7 = 8'h5be0cd19; 
 		   end
 		end
 
@@ -147,8 +158,39 @@ always_comb begin
 		// move to WRITE stage
 		COMPUTE: begin
 		// 64 processing rounds steps for 512-bit block 
+			A = hash0;
+			B = hash1;
+			C = hash2;
+			D = hash3;
+			E = hash4;
+			F = hash5;
+			G = hash6;
+			H = hash7;
+			
+			for (int t = 0; t < 64; t = t + 1) begin
+				// Word expansion for Wt
+			   if (t < 16) begin
+					w[t] = message[t];
+			   end else begin
+					// Word expansion for t >= 16
+					S0 = ror(w[t-15], 7) ^ ror(w[t-15], 18) ^ (w[t-15] >> 3);
+					S1 = rorr(w[t-2], 17) ^ ror(w[t-2], 19) ^ (w[t-2] >> 10);
+					w[t] = w[t-16] + s0 + w[t-7] + s1;
+			   end
+				
+				{A, B, C, D, E, F, G, H} = sha256_op(A, B, C, D, E, F, G, H, w[t], t);
+			end
 
-					
+			
+			hash0 = hash0 + A;
+			hash1 = hash1 + B;
+			hash2 = hash2 + C;
+			hash3 = hash3 + D;
+			hash4 = hash4 + E;
+			hash5 = hash5 + F;
+			hash6 = hash6 + G;
+			hash7 = hash7 + H;
+				
 		end
 
 		// h0 to h7 each are 32 bit hashes, which makes up total 256 bit value
