@@ -7,7 +7,7 @@ module simplified_sha256 #(parameter integer NUM_OF_WORDS = 40)(
  input logic [31:0] memory_read_data);
 
 // FSM state variables 
-enum logic [2:0] {IDLE, BLOCK, COMPUTE, WRITE} state;
+enum logic [2:0] {IDLE, BLOCK, COMPUTE, WRITE, READ} state;
 
 parameter integer SIZE = NUM_OF_WORDS * 32; 
 
@@ -18,11 +18,12 @@ parameter integer SIZE = NUM_OF_WORDS * 32;
 // Local variables
 logic [31:0] w[64];
 logic [31:0] message[16 * ((NUM_OF_WORDS + 2) / 16 + (((NUM_OF_WORDS+2)%16) > 0))];
+//40-> 48, 20 -> 32, ...
 logic [31:0] wt;
 logic [31:0] S0,S1;
 logic [31:0] hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7;
 logic [31:0] A, B, C, D, E, F, G, H;
-logic [ 7:0] i, j; 
+logic [ 7:0] i, j; // j will be block number, offset used to iterate through message
 logic [15:0] offset; // in word address
 logic [15:0] num_blocks;
 //logic        enable_write;
@@ -56,17 +57,11 @@ assign memory_we = enable_write;
 assign memory_write_data = present_write_data;
 
 
-assign num_blocks = determine_num_blocks(NUM_OF_WORDS); 
+assign num_blocks = (NUM_OF_WORDS + 2) / 16 + 1; 
 assign tstep = (i - 1);
 
 // Note : Function defined are for reference purpose. Feel free to add more functions or modify below.
 // Function to determine number of blocks in memory to fetch
-function logic [15:0] determine_num_blocks(input logic [31:0] size);
-  // Student to add function implementation
-	begin
-		determine_num_blocks = (size + 2) / 16 + 1;
-	end
-endfunction
 
 
 // SHA256 hash round
@@ -140,31 +135,39 @@ begin
 				i <= '0;
 				enable_write <= '0;
 				offset <= '0;
-				num_blocks <= '0;
 				state <=  BLOCK;
 
+			end
 		end
-		end
-
 		// SHA-256 FSM 
 		// Get a BLOCK from the memory, COMPUTE Hash output using SHA256 function    
 		// and write back hash value back to memory
 		BLOCK: begin
-			
-		
-			i <= '0;
-			enable_write <= '0;
-			offset <= '0;
-			
-			if(num_blocks > '0) begin
-				present_addr = input_addr + offset;
-				state <= COMPUTE;
-			end else begin 
-				state <= WRITE;
-			end
+
+			state <= READ;
+			offset <= j * 16;
+			j <= j + 1;
+
 		// Fetch message in 512-bit block size
 		// For each of 512-bit block initiate hash value computation
 
+		end
+
+		READ: begin
+			if(offset == NUM_OF_WORDS) begin //pad 100...
+				message[offset] <= 32'h80000000;
+				for(i = offset + 1; i < (num_blocks*16) - 1; i = i + 1 ) begin
+					message[i] = '0;
+				end
+				message[num_blocks*16 - 1] = SIZE;
+				state <= WRITE; 
+			end
+			else begin
+				for(i = offset; i < offset + 16, i = i + 1) begin
+					message[i] = mem_read_data;
+				end
+				state <= COMPUTE;
+			end
 		end
 		
 		// For each block compute hash function
@@ -177,19 +180,29 @@ begin
 			{A,B,C,D,E,F,G,H} <= {hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7};
 			for(i = 0; i < 64; i = i + 1) begin
 				if(i < 16) begin // since we use hex
-					w[i] = message[i];
+					w[i] = message[i+(j*16)];
 				end else begin
 					S0 <= ror(w[i-15], 7) ^ ror(w[i-15], 18) ^ ror(w[i-15], 3);
 					S1 <= ror(w[i-2], 17) ^ ror(w[i-2], 19) ^ ror(w[i-2], 10);
 					w[i] <= w[i-16] + S0 + w[i-7] + S1;
 				end
+			end 
 
+			for(i = 0; i < 64; i++) begin
 				{A,B,C,D,E,F,G,H} <= sha256_op(A,B,C,D,E,F,G,H, w[i], i);
-
-				{hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7} <= {hash0 + A, hash1 + B, hash2 + C, hash3 + D, hash4 + E, hash5 + F, hash6 + G, hash7 + H};
 			end
 
-			state = (num_blocks > '0) ? BLOCK : WRITE;
+			hash0 <= hash0 + A;
+			hash1 <= hash1 + B;
+			hash2 <= hash2 + C;
+			hash3 <= hash3 + D;
+			hash4 <= hash4 + E;
+			hash5 <= hash5 + F;
+			hash6 <= hash6 + G;
+			hash7 <= hash7 + H;
+			
+
+			state <= WRITE;
 					
 		end
 
@@ -197,34 +210,15 @@ begin
 		// h0 to h7 after compute stage has final computed hash value
 		// write back these h0 to h7 to memory starting from output_addr
 		WRITE: begin
-		
-			if(j == NUM_OF_WORDS)begin
-				message[offset] <= 32'h80000000;
-				next_state <= WRITE;
-			end
-			else if(j > NUM_OF_WORDS & j < (num_blocks*16)) begin
-			
-					message[offset] <= NUM_OF_WORDS*32;
-					next_state <= WRITE;
-			end
-			else if(j == (num_blocks*16)) begin
-					next_state <= COMPUTE;
-			end
-			else begin
-				message[j] <= memory_read_data; //read in a word
-				next_state <= WRITE;
-			end
-			
-			j <= j + 1;
-			offset <= offset + 1; //for next word in memory
-			
+						
 			present_addr <= hash_addr; //error truncating here: FIX 32bits -> 8 bits
 			present_write_data <= {hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7};
 			enable_write <= 'h1;
-			state <= IDLE;
+			
+			state <= (offset < NUM_OF_WORDS) ? BLOCK : IDLE;
 		end
 		default: begin
-			next_state <= IDLE;
+			state <= IDLE;
 		end
       endcase
 	end
