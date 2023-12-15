@@ -7,7 +7,7 @@ module simplified_sha256 #(parameter integer NUM_OF_WORDS = 40)(
  input logic [31:0] memory_read_data);
 
 // FSM state variables 
-enum logic [2:0] {IDLE, BLOCK, COMPUTE, WRITE} state,next_state;
+enum logic [2:0] {IDLE, BLOCK, COMPUTE, WRITE} state;
 
 parameter integer SIZE = NUM_OF_WORDS * 32; 
 
@@ -63,10 +63,9 @@ assign tstep = (i - 1);
 // Function to determine number of blocks in memory to fetch
 function logic [15:0] determine_num_blocks(input logic [31:0] size);
   // Student to add function implementation
-begin
-	determine_num_blocks = (size + 2) / 16 + 1;
-end
-
+	begin
+		determine_num_blocks = (size + 2) / 16 + 1;
+	end
 endfunction
 
 
@@ -74,20 +73,18 @@ endfunction
 function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w,
                                  input logic [7:0] t);
     logic [31:0] S1, S0, ch, maj, t1, t2; // internal signals
-begin
-    S0 = ror(a, 2) ^ ror(a, 13) ^ ror(a, 22);
-	maj = (a & b) ^ (a & c) ^ (b ^ c);
-	t2 = S0 + maj;
+	begin
+		S0 = ror(a, 2) ^ ror(a, 13) ^ ror(a, 22);
+		maj = (a & b) ^ (a & c) ^ (b ^ c);
+		t2 = S0 + maj;
 
-	S1 = ror(e, 6) ^ ror(e, 11) ^ ror(e, 25);
-    ch = (e & f) ^ ((~e) & g);
-	t1 = h + S1 + ch + k[t] + w;
-	
-    sha256_op = {t1 + t2, a, b, c, d + t1, e, f, g};
-end
+		S1 = ror(e, 6) ^ ror(e, 11) ^ ror(e, 25);
+		ch = (e & f) ^ ((~e) & g);
+		t1 = h + S1 + ch + k[t] + w;
+		
+		sha256_op = {t1 + t2, a, b, c, d + t1, e, f, g};
+	end
 endfunction
-
-
 
 // Right Rotation Example : right rotate input x by r
 // Lets say input x = 1111 ffff 2222 3333 4444 6666 7777 8888
@@ -101,9 +98,9 @@ endfunction
 
 function logic [31:0] ror(input logic [31:0] in,
                                   input logic [7:0] s);
-begin
-   ror = (in >> s) | (in << (32-s));
-end
+	begin
+	ror = (in >> s) | (in << (32-s));
+	end
 endfunction
 
 
@@ -114,22 +111,10 @@ begin
 
   end 
   else begin 
-	state <= next_state;
-	
-  end
-end
-
-
-
-// SHA-256 FSM 
-// Get a BLOCK from the memory, COMPUTE Hash output using SHA256 function
-// and write back hash value back to memory
-always_comb begin
-  if (!rst_n) begin
-		state <= IDLE;
-  end
-  else begin 
-	  case (state)
+	// SHA-256 FSM 
+	// Get a BLOCK from the memory, COMPUTE Hash output using SHA256 function
+	// and write back hash value back to memory
+	case (state)
 		// Initialize hash values h0 to h7 and a to h, other variables and memory we, address offset, etc
 		IDLE: begin 
 			if(start) begin 
@@ -157,9 +142,9 @@ always_comb begin
 				enable_write <= '0;
 				offset <= '0;
 				num_blocks <= '0;
-				next_state <= WAIT;
+				state <= WAIT;
 
-		   end
+		end
 		end
 
 		// SHA-256 FSM 
@@ -168,9 +153,9 @@ always_comb begin
 		BLOCK: begin
 			if(num_blocks > '0) begin
 				present_addr = input_addr + offset;
-				next_state = COMPUTE;
+				state <= COMPUTE;
 			end else begin 
-				next_state = WRITE;
+				state <= WRITE;
 			end
 		// Fetch message in 512-bit block size
 		// For each of 512-bit block initiate hash value computation
@@ -199,7 +184,7 @@ always_comb begin
 				{hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7} = {hash0 + A, hash1 + B, hash2 + C, hash3 + D, hash4 + E, hash5 + F, hash6 + G, hash7 + H}
 			end
 
-			next_state = (num_blocks > '0) ? BLOCK : WRITE;
+			state = (num_blocks > '0) ? BLOCK : WRITE;
 					
 		end
 
@@ -210,11 +195,11 @@ always_comb begin
 			present_addr <= hash_addr;
 			present_write_data <= {hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7};
 			enable_write <= 'h1;
-			next_state <= IDLE;
+			state <= IDLE;
 		end
-      endcase
+	endcase
 	end
-end
+end 
 
 // Generate done when SHA256 hash computation has finished and moved to IDLE state
 assign done = (state == IDLE);
