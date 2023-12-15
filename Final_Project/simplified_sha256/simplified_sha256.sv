@@ -24,8 +24,8 @@ logic [31:0] hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7;
 logic [31:0] A, B, C, D, E, F, G, H;
 logic [ 7:0] i, j; 
 logic [15:0] offset; // in word address
-logic [ 7:0] num_blocks;
-logic        enable_write;
+logic [15:0] num_blocks;
+//logic        enable_write;
 logic [15:0] present_addr;
 logic [31:0] present_write_data;
 logic [512:0] data_read;
@@ -51,7 +51,7 @@ parameter int k[0:63] = '{
 // for reading from memory to get original message
 // for writing final computed has value
 assign memory_clk = clk;
-assign memory_addr = present_addr + next_offset;
+assign memory_addr = present_addr + offset;
 assign memory_we = enable_write;
 assign memory_write_data = present_write_data;
 
@@ -137,12 +137,11 @@ begin
 				G <= 32'h1f83d9ab;
 				H <= 32'h5be0cd19;
 				
-				i <= '0; 
-				j <= '0;
+				i <= '0;
 				enable_write <= '0;
 				offset <= '0;
 				num_blocks <= '0;
-				state <= WAIT;
+				state <=  BLOCK;
 
 		end
 		end
@@ -151,6 +150,12 @@ begin
 		// Get a BLOCK from the memory, COMPUTE Hash output using SHA256 function    
 		// and write back hash value back to memory
 		BLOCK: begin
+			
+		
+			i <= '0;
+			enable_write <= '0;
+			offset <= '0;
+			
 			if(num_blocks > '0) begin
 				present_addr = input_addr + offset;
 				state <= COMPUTE;
@@ -169,19 +174,19 @@ begin
 		COMPUTE: begin
 		// 64 processing rounds steps for 512-bit block
 		
-			{A,B,C,D,E,F,G,H} = {hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7};
+			{A,B,C,D,E,F,G,H} <= {hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7};
 			for(i = 0; i < 64; i = i + 1) begin
 				if(i < 16) begin // since we use hex
 					w[i] = message[i];
 				end else begin
-					S0 = ror(w[i-15], 7) ^ ror(w[i-15], 18) ^ ror(w[i-15], 3);
-					S1 = ror(w[i-2], 17) ^ ror(w[i-2], 19) ^ ror(w[i-2], 10);
-					w[i] = w[i-16] + S0 + w[i-7] + S1;
+					S0 <= ror(w[i-15], 7) ^ ror(w[i-15], 18) ^ ror(w[i-15], 3);
+					S1 <= ror(w[i-2], 17) ^ ror(w[i-2], 19) ^ ror(w[i-2], 10);
+					w[i] <= w[i-16] + S0 + w[i-7] + S1;
 				end
 
-				{A,B,C,D,E,F,G,H} = sha256_op(A,B,C,D,E,F,G,H, w[i], i);
+				{A,B,C,D,E,F,G,H} <= sha256_op(A,B,C,D,E,F,G,H, w[i], i);
 
-				{hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7} = {hash0 + A, hash1 + B, hash2 + C, hash3 + D, hash4 + E, hash5 + F, hash6 + G, hash7 + H}
+				{hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7} <= {hash0 + A, hash1 + B, hash2 + C, hash3 + D, hash4 + E, hash5 + F, hash6 + G, hash7 + H};
 			end
 
 			state = (num_blocks > '0) ? BLOCK : WRITE;
@@ -192,12 +197,36 @@ begin
 		// h0 to h7 after compute stage has final computed hash value
 		// write back these h0 to h7 to memory starting from output_addr
 		WRITE: begin
-			present_addr <= hash_addr;
+		
+			if(j == NUM_OF_WORDS)begin
+				message[offset] <= 32'h80000000;
+				next_state <= WRITE;
+			end
+			else if(j > NUM_OF_WORDS & j < (num_blocks*16)) begin
+			
+					message[offset] <= NUM_OF_WORDS*32;
+					next_state <= WRITE;
+			end
+			else if(j == (num_blocks*16)) begin
+					next_state <= COMPUTE;
+			end
+			else begin
+				message[j] <= memory_read_data; //read in a word
+				next_state <= WRITE;
+			end
+			
+			j <= j + 1;
+			offset <= offset + 1; //for next word in memory
+			
+			present_addr <= hash_addr; //error truncating here: FIX 32bits -> 8 bits
 			present_write_data <= {hash0, hash1, hash2, hash3, hash4, hash5, hash6, hash7};
 			enable_write <= 'h1;
 			state <= IDLE;
 		end
-	endcase
+		default: begin
+			next_state <= IDLE;
+		end
+      endcase
 	end
 end 
 
